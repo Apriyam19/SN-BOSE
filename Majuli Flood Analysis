@@ -1,0 +1,116 @@
+var assets = [
+  {fc: table,  name: 'shape1'},
+  {fc: table2, name: 'shape2'},
+  {fc: table3, name: 'shape3'},
+  {fc: table4, name: 'shape4'}
+];
+
+assets.forEach(function(a) {
+  Export.table.toDrive({
+    collection: a.fc,
+    description: a.name,
+    fileFormat: 'SHP',
+    folder: 'gee_exports'
+  });
+});
+// ======================================
+// STUDY AREA (MAJULI)
+// ======================================
+
+var studyArea = table2;
+
+Map.clear();
+Map.centerObject(studyArea, 10);
+
+Map.addLayer(
+  studyArea.style({
+    color: 'red',
+    fillColor: '00000000',
+    width: 2
+  }),
+  {},
+  'Majuli Boundary'
+);
+// ======================================
+// MAJULI EROSION RISK ANALYSIS
+// NDVI + FLOOD + RAINFALL + SLOPE
+// ======================================
+
+// --------------------------------------
+// STUDY AREA (Majuli)
+// --------------------------------------
+
+// ======================================
+// FLOOD MAPPING (BEFORE vs AFTER)
+// ======================================
+
+// Before Flood (May 2023)
+var before = ee.ImageCollection('COPERNICUS/S1_GRD')
+  .filterBounds(studyArea)
+  .filterDate('2023-05-01','2023-05-31')
+  .filter(ee.Filter.eq('instrumentMode','IW'))
+  .filter(ee.Filter.eq('orbitProperties_pass','DESCENDING'))
+  .filter(ee.Filter.listContains(
+      'transmitterReceiverPolarisation','VV'))
+  .select('VV')
+  .median()
+  .clip(studyArea);
+
+// After Flood (August 2023)
+var after = ee.ImageCollection('COPERNICUS/S1_GRD')
+  .filterBounds(studyArea)
+  .filterDate('2023-08-15','2023-09-15')
+  .filter(ee.Filter.eq('instrumentMode','IW'))
+  .filter(ee.Filter.eq('orbitProperties_pass','DESCENDING'))
+  .filter(ee.Filter.listContains(
+      'transmitterReceiverPolarisation','VV'))
+  .select('VV')
+  .median()
+  .clip(studyArea);
+
+// Change Detection
+var difference = before.subtract(after);
+
+// New Flood Water
+var floodMask = difference.gt(3);
+
+// Remove isolated pixels
+floodMask = floodMask
+  .focal_max(1)
+  .focal_min(1);
+
+// Display
+Map.addLayer(before,{
+  min:-25,
+  max:0
+},'Before Flood');
+
+Map.addLayer(after,{
+  min:-25,
+  max:0
+},'After Flood');
+
+Map.addLayer(difference,{
+  min:0,
+  max:8,
+  palette:['white','yellow','orange','red']
+},'SAR Difference');
+
+Map.addLayer(
+  floodMask.selfMask(),
+  {
+    palette:['0000FF']
+  },
+  'Flood Prone Areas'
+);
+var floodArea = floodMask.selfMask()
+    .multiply(ee.Image.pixelArea());
+
+var floodStats = floodArea.reduceRegion({
+  reducer: ee.Reducer.sum(),
+  geometry: studyArea,
+  scale:10,
+  maxPixels:1e13
+});
+
+print('Flood Area (sq.m)', floodStats);
